@@ -1,36 +1,77 @@
+//possible token types for the tokenizer
 const TokenTypes = {
-    Literal: 'Literal',
+    Literal: 'Literal',                 
     Variable: 'Variable',
     Operator: 'Operator',
     LeftParenthesis: 'LeftParenthesis',
     RightParenthesis: 'RightParenthesis',
     Function: 'Function',
-    Delimter: 'Delimiter'    
+    Delimiter: 'Delimiter'    
 }
 
+//enum of possible operator associativities
 const Associativity = {
     Left: 'Left',
     Right: 'Right'
 }
 
+//class represents a mathematical operator
 class Operator {
     constructor (chr, precidence, associativity, evalFunction){
-        this.chr = chr;
-        this.precidence = precidence;
-        this.associativity = associativity;
-        this.eval = evalFunction;
+        this.chr = chr;                     //single character that represents this operator
+        this.precidence = precidence;       //priority of this operator (BODMAS)
+        this.associativity = associativity; //associativity of this operator (left or right)
+        this.eval = evalFunction;           //function that implements this operator
     }
 
 };
 
+//supported operators
 const Operators = {
-    '+': new Operator ('+', 2, Associativity.Left, (a,b)=>{return a+b}),
-    '-': new Operator ('-', 2, Associativity.Left, (a,b)=>{return a-b}),
-    '*': new Operator ('*', 3, Associativity.Left, (a,b)=>{return a*b}),
-    '/': new Operator ('/', 3, Associativity.Left, (a,b)=>{return a/b}),
-    '^': new Operator ('^', 4, Associativity.Right, (a,b)=>{return Math.pow(a,b)})
-};    
+    '+': new Operator ('+', 1, Associativity.Left, (a,b)=>{return a+b}),
+    '-': new Operator ('-', 1, Associativity.Left, (a,b)=>{return a-b}),
+    '*': new Operator ('*', 2, Associativity.Left, (a,b)=>{return a*b}),
+    '/': new Operator ('/', 2, Associativity.Left, (a,b)=>{return a/b}),
+    '^': new Operator ('^', 3, Associativity.Right, Math.pow)
+};
 
+//supported functions in addition to standard javascript Math functions
+const MathFunctions = {
+    'avg': (...args) => args.reduce( (total, currentValue) => total + currentValue ) / args.length ,
+    'mean': (...args) => args.reduce( (total, currentValue) => total + currentValue ) / args.length ,
+    'median': (...args) => {
+        args.sort( (a,b)=>a-b);
+        if (args.length % 2 === 0){ 
+            return (args[args.length/2 - 1] + args[args.length/2]) / 2 
+        }
+        else { 
+            return args[args.length/2] 
+        }
+    },
+    'mode': (...args) => {
+        args.sort((a,b)=>a-b);
+        let mode;
+        let count = 0;
+        let maxCount = 0;
+
+        args.forEach( (n, i, arr) => {
+            if (i === 0 || (i > 0 && arr[i-1] === n) ) {
+                count ++;
+            }
+            else{
+                count = 1;
+            }
+            if (mode === undefined || count > maxCount){
+                maxCount = count;
+                mode = n;
+            }            
+        })
+
+        return mode;
+    }
+};
+
+//class represents a complete parsed token
 class Token {
     constructor (type, value){
         this.type = type;
@@ -47,6 +88,7 @@ class Token {
     }
 }
 
+//class represents a character that belongs to a token during parsing
 class TokenFragment {
     constructor (type, chr){
         this.type = type;
@@ -57,6 +99,7 @@ class TokenFragment {
     } 
 }
 
+//class that builds a list of Tokens from a stream of TokenFragments
 class TokenBuffer {
     constructor (){
         this.tokens = [];
@@ -64,7 +107,10 @@ class TokenBuffer {
         this._chrBuffer = [];
     }
     write(tokenFragment){
-        if (this._typeBuffer && tokenFragment.type != this._typeBuffer){
+        if (this._typeBuffer && (tokenFragment.type != this._typeBuffer) || isSingleCharacterToken(this._typeBuffer)){
+            if (this._typeBuffer === TokenTypes.Variable && tokenFragment.type === TokenTypes.LeftParenthesis){
+                this._typeBuffer = TokenTypes.Function;
+            }            
             this.flush();
         }
         this._typeBuffer = tokenFragment.type;
@@ -79,6 +125,7 @@ class TokenBuffer {
     }
 }
 
+//Helper functions for the tokenizer
 function isDigit(chr){
     return ((chr >= '0' && chr <= '9') || chr === '.');
 }
@@ -91,6 +138,16 @@ function isOperator(chr){
     return Operators.hasOwnProperty(chr);
 }
 
+//helper function for TokenBuffer
+function isSingleCharacterToken(tokenType){
+    return [
+        TokenTypes.LeftParenthesis, 
+        TokenTypes.RightParenthesis, 
+        TokenTypes.Delimter
+    ].includes(tokenType);
+}
+
+//builds a list of tokens from an input string
 function tokenize(str){
     
     let buffer = new TokenBuffer();
@@ -107,7 +164,7 @@ function tokenize(str){
             buffer.write(new TokenFragment(TokenTypes.Operator, chr));
         }
         else if (chr === ','){
-            buffer.write(new TokenFragment(TokenTypes.ArgumentDelimter, chr));
+            buffer.write(new TokenFragment(TokenTypes.Delimiter, chr));
         }
         else if (chr === '('){
             buffer.write(new TokenFragment(TokenTypes.LeftParenthesis, chr));
@@ -122,17 +179,24 @@ function tokenize(str){
     
 };
 
+//helper class for parser
 class Stack extends Array {
     peek(){
         return this.slice(-1)[0];
     }
 };
 
+//helper class that implements an AST as an array of ASTNodes
 class AbstractSyntaxTree extends Array {
-    addOperator(token){
-        let rightChild = this.pop();
-        let leftChild = this.pop();
-        this.push(new ASTNode(token, leftChild, rightChild));
+    addOperator(token, argumentCount){
+        let args = []
+        argumentCount = argumentCount || 2;
+        
+        for (let i = 0; i < argumentCount; i++ ){
+            args.push(this.pop());
+        }
+        args.reverse();
+        this.push(new ASTNode(token, args));
     };
     solve(){
         if (this[0]){
@@ -144,36 +208,46 @@ class AbstractSyntaxTree extends Array {
     };
 };
 
+//class represents an AST node and implements the solver
 class ASTNode{
-    constructor(token, leftChild, rightChild){
+    constructor(token, args){
         this.token = token;
-        this.leftChild = leftChild;
-        this.rightChild = rightChild;
+        this.args = args;
     }
-    toString(padding){
-        if (!this.leftChild && !this.rightChild){
-            return `${this.token.value}\t=>null\n${Array(padding+1).join("\t")}=>null`;   
-        }
-        
-        padding = padding || 1;
-        padding++;
-        return `${this.token.value}\t=>${this.leftChild.toString(padding)}\n${Array(padding).join("\t")}=>${this.rightChild.toString(padding)}`;
-    };
     solve(){
         if (this.token.type === TokenTypes.Literal){
             return parseFloat(this.token.value);
         }
         else if (this.token.type === TokenTypes.Operator){
-            let leftOperand = this.leftChild.solve();
-            let rightOperand = this.rightChild.solve();
-            return Operators[this.token.value].eval(leftOperand, rightOperand);
+            this.args = this.args.map( arg => {return arg.solve()});
+            return Operators[this.token.value].eval(...this.args);
+        }
+        else if (this.token.type === TokenTypes.Function){
+            this.args = this.args.map( arg => {return arg.solve()});
+                
+            try {
+                if (MathFunctions[this.token.value]){
+                    return MathFunctions[this.token.value](...this.args);
+                }
+                else{
+                    return Math[this.token.value](...this.args);
+                }                    
+            }
+            catch (err){
+                if (err instanceof TypeError){
+                    err.message = err.message.replace('[this.token.value]', '.' + this.token.value);
+                }
+                throw err;
+            }
         }
     }
 }
 
+//create an AST from a list of tokens using the shunting yard algorithm 
 function parse(tokens){
     let output = new AbstractSyntaxTree();
     let stack = new Stack();
+    var argCount = 0;
     tokens.forEach(token=>{
         switch (token.type){
             case TokenTypes.Literal:
@@ -185,10 +259,11 @@ function parse(tokens){
                 stack.push(token);
                 break;
             
-            case TokenTypes.Delimter:
+            case TokenTypes.Delimiter:
                 while (stack.peek().type != TokenTypes.LeftParenthesis){
                     output.addOperator(stack.pop());
                 }
+                argCount++;
                 break;
             
             case TokenTypes.Operator:
@@ -214,11 +289,13 @@ function parse(tokens){
                     output.addOperator(stack.pop());
                 }
                 stack.pop();
+                
+                if (stack.peek() && stack.peek().type === TokenTypes.Function){
+                    output.addOperator(stack.pop(), argCount + 1);
+                    
+                }
                 break;
-        }
 
-        if (stack.peek() && stack.peek().type === TokenTypes.Function){
-            output.addOperator(stack.pop());
         }
     });
 
@@ -229,9 +306,8 @@ function parse(tokens){
     return output;
 }
 
+//solve a mathematical expression as a string
 function solve(expression){
     return parse(tokenize(expression)).solve();
 }
-
-console.log( solve('3 + 4 * 2 / ( 1 - 5 ) ^2^3') );
 
