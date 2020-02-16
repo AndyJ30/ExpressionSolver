@@ -29,8 +29,9 @@
     </style>
     <script>
         function solveExpression(){
+            let expr = document.getElementById('expression').value;
             try{
-                document.getElementById('result').textContent = solve(document.getElementById('expression').value);
+                document.getElementById('result').textContent = expr + " = " + solve(expr);
             }
             catch(err){
                 document.getElementById('result').textContent = err.message;
@@ -50,7 +51,7 @@
             
             d3.select("#ASTDiagram").selectAll("*").remove();
             var svg = d3.select("#ASTDiagram")
-                .attr("width", width + margin.right + margin.left)
+                .attr("width", "100%")
                 .attr("height", height + margin.top + margin.bottom)
                 .append("g")
                 .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
